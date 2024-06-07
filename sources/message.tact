@@ -4,6 +4,21 @@ message LogEventMintRecord {
     generate_number: Int;
 }
 
+message NftDeploy {
+    index: Int as uint256;
+    owner: Address;
+    content: Cell;
+    royalty_destination: Address;
+    numerator: Int as uint16;
+    denominator: Int as uint16;
+}
+
+message RequestNftDeploy {
+    index: Int as uint256;
+    amount: Int as coins;
+    owner: Address;
+    content: Cell;
+}
 
 message(0x693d3950) GetRoyaltyParams {
     query_id: Int as uint64;
