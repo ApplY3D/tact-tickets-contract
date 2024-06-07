@@ -1,31 +1,65 @@
+import "@stdlib/ownable";
 import "./item.tact";
 import "./message.tact";
 
-contract NftCollection {
+contract NftCollection with Ownable {
     next_item_index: Int as uint32 = 0;
-    owner_address: Address;
+    owner: Address;
     royalty_params: RoyaltyParams?;                      
-    collection_content: Cell;   
+    collection_content: Cell;
+    activated_tickets_transfer: Bool = false;
 
-    init(owner_address: Address, collection_content: Cell, royalty_params: RoyaltyParams){
-        self.owner_address = owner_address;
+    init(owner: Address, collection_content: Cell, royalty_params: RoyaltyParams){
+        self.owner = owner;
         self.collection_content = collection_content; 
         self.royalty_params = royalty_params;
     }
 
-    receive("Mint"){
+    receive("Event ended") {
+        self.activated_tickets_transfer = true;
+    }
+
+    receive(msg: RequestMintNft){
+        self.requireOwner();
         let ctx: Context = context(); // get sender Info
         let msgValue: Int = ctx.value;
         let tonBalanceBeforeMsg: Int = myBalance() - msgValue;
         let storageFee: Int = minTonsForStorage - min(tonBalanceBeforeMsg, minTonsForStorage);
         msgValue = msgValue - (storageFee + gasConsumption);
-        self.mint(ctx.sender, msgValue);
+        self.mint(ctx.sender, msg.owner, msg.content, msgValue);
 
         emit(LogEventMintRecord{ minter: sender(), item_id: self.next_item_index, generate_number: nativeRandom() }.toCell());
     }
 
+
+    receive(msg: TransferByCollection) {
+        require(msg.index <= self.next_item_index, "Invalid Index");
+        let ctx: Context = context();
+        let nft_init: StateInit = initOf NftItem(myAddress(), msg.index);
+        let nft_address: Address = contractAddress(nft_init);
+        let active: Int = 0;
+        if (self.activated_tickets_transfer) {
+            active = 1;
+        }
+        let custom_payload: Cell = beginCell().storeAddress(sender()).storeUint(active, 1).endCell();
+        send(SendParameters{
+            to: nft_address,
+            value: ctx.value,
+            mode: SendPayGasSeparately,
+            bounce: false,
+            body: Transfer{
+                query_id: msg.query_id,
+                new_owner: msg.new_owner,
+                response_destination: msg.response_destination,
+                custom_payload: custom_payload,
+                forward_amount: msg.forward_amount,
+                forward_payload: msg.forward_payload,
+            }.toCell()
+        });
+    }
+
     // ===== Private Methods ===== //
-    fun mint(sender: Address, msgValue: Int) {
+    fun mint(sender: Address, owner: Address, content: Cell?, msgValue: Int) {
         require(self.next_item_index >= 0, "non-sequential NFTs");
         let nft_init: StateInit = self.getNftItemInit(self.next_item_index);
         send(SendParameters{
@@ -33,17 +67,21 @@ contract NftCollection {
                 value: msgValue, 
                 bounce: false,
                 mode: SendIgnoreErrors,
-                body: Transfer {
-                    query_id: 0,
-                    new_owner: sender,
-                    response_destination: self.owner_address,
-                    custom_payload: self.collection_content,
-                    forward_amount: 0,
-                    forward_payload: emptySlice()
+                body: NftDeploy{
+                    index: self.next_item_index,
+                    owner: owner,
+                    content: content,
                 }.toCell(),
                 code: nft_init.code,
                 data: nft_init.data
             });
+        send(SendParameters{ 
+            to: sender,
+            value: 0,
+            mode: SendRemainingValue,
+            bounce: true,
+            body: Excesses { query_id: 1 }.toCell()
+        });
         // dump(self.next_item_index); // Reference at: https://tact-by-example.org/03-emit
         self.next_item_index = self.next_item_index + 1;
     }
@@ -59,7 +97,7 @@ contract NftCollection {
                 query_id: msg.query_id,
                 numerator:  (self.royalty_params!!).numerator,
                 denominator: (self.royalty_params!!).denominator,
-                destination: self.owner_address
+                destination: self.owner
             }.toCell()
         });        
     }
@@ -73,7 +111,7 @@ contract NftCollection {
         return CollectionData{
             next_item_index: self.next_item_index, 
             collection_content: b.toCell(), 
-            owner_address: self.owner_address
+            owner_address: self.owner
         };
     }
 

@@ -7,17 +7,12 @@ message LogEventMintRecord {
 message NftDeploy {
     index: Int as uint256;
     owner: Address;
-    content: Cell;
-    royalty_destination: Address;
-    numerator: Int as uint16;
-    denominator: Int as uint16;
+    content: Cell?;
 }
 
-message RequestNftDeploy {
-    index: Int as uint256;
-    amount: Int as coins;
+message RequestMintNft {
     owner: Address;
-    content: Cell;
+    content: Cell?;
 }
 
 message(0x693d3950) GetRoyaltyParams {
@@ -38,6 +33,15 @@ struct RoyaltyParams {
     numerator: Int;
     denominator: Int;
     destination: Address;
+}
+message TransferByCollection {
+    index: Int as uint64;
+    query_id: Int as uint64;
+    new_owner: Address;
+    response_destination: Address?;
+    custom_payload: Cell?;
+    forward_amount: Int as coins;
+    forward_payload: Slice as remaining;
 }
 message(0x5fcc3d14) Transfer {
     query_id: Int as uint64;

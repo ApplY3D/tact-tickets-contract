@@ -17,49 +17,57 @@ contract NftItem {
         self.is_initialized = false;
     }
 
+    receive(msg: NftDeploy) {
+        require(sender() == self.collection_address, "Invalid Sender");
+        require(self.item_index == msg.index, "Invalid Index");
+        require(!self.is_initialized, "Already Deployed");
+        self.owner = msg.owner;
+        self.individual_content = msg.content;
+        self.is_initialized = true;
+    }
+
+
     receive(msg: Transfer){
-        let ctx: Context = context(); // Reference: https://docs.tact-lang.org/language/ref/common#context
+        let ctx: Context = context();
+        let custom_payload: Slice? = null;
+        let from: Address? = null;
+        let transfer_acticated_tickets: Int = 0;
+        if(msg.custom_payload != null) {
+          custom_payload = (msg.custom_payload!!).asSlice();
+          from = (custom_payload!!).loadAddress();
+          transfer_acticated_tickets = (custom_payload!!).loadUint(1);
+          (custom_payload!!).endParse();
+        }
+        require(self.is_initialized == true, "not initialized");
+        require(ctx.sender == self.collection_address, "Only collection can transfer");
+        require(from == self.owner!!, "Invalid Owner");
         let msgValue: Int = self.msgValue(ctx.value);
-        
-        if (self.is_initialized == false) {  // Initial Transfer, aka the "Minting" of the NFT
-            require(ctx.sender == self.collection_address, "initialized tx need from collection");
-            self.is_initialized = true;
-            self.owner = msg.new_owner;
-            self.individual_content = msg.custom_payload;
+        self.owner = msg.new_owner;  // change current owner to the new_owner
+        if (msg.forward_amount > 0) {
             send(SendParameters{
+                to: msg.new_owner,
+                value: msg.forward_amount,
+                mode:  SendPayGasSeparately, 
+                bounce: true,
+                body: OwnershipAssigned{
+                    query_id: msg.query_id,
+                    prev_owner: ctx.sender,
+                    forward_payload: msg.forward_payload
+                }.toCell()
+            }); 
+        }
+
+        msgValue = msgValue - ctx.readForwardFee(); 
+        if (msg.response_destination != null) { 
+            send(SendParameters{ 
                 to: msg.response_destination!!,
-                value: msgValue,
+                value: msgValue - msg.forward_amount,
                 mode: SendPayGasSeparately,
+                bounce: true,
                 body: Excesses { query_id: msg.query_id }.toCell()
             });
-        } else {
-            require(ctx.sender == self.owner!!, "not owner");
-            self.owner = msg.new_owner;  // change current owner to the new_owner
-            if (msg.forward_amount > 0) {
-                send(SendParameters{
-                    to: msg.new_owner,
-                    value: msg.forward_amount,
-                    mode:  SendPayGasSeparately, 
-                    bounce: true,
-                    body: OwnershipAssigned{
-                        query_id: msg.query_id,
-                        prev_owner: ctx.sender,
-                        forward_payload: msg.forward_payload
-                    }.toCell()
-                }); 
-            }
-
-            msgValue = msgValue - ctx.readForwardFee(); 
-            if (msg.response_destination != null) { 
-                send(SendParameters{ 
-                    to: msg.response_destination!!,
-                    value: msgValue - msg.forward_amount,
-                    mode: SendPayGasSeparately,
-                    bounce: true,
-                    body: Excesses { query_id: msg.query_id }.toCell()
-                });
-            } 
-        }
+        } 
+        
     }
     
     receive(msg: GetStaticData){ 
