@@ -7,7 +7,7 @@ contract NftCollection with Ownable {
     owner: Address;
     royalty_params: RoyaltyParams?;                      
     collection_content: Cell;
-    activated_tickets_transfer: Bool = false;
+    event_ended: Bool = false;
 
     init(owner: Address, collection_content: Cell, royalty_params: RoyaltyParams){
         self.owner = owner;
@@ -16,7 +16,8 @@ contract NftCollection with Ownable {
     }
 
     receive("Event ended") {
-        self.activated_tickets_transfer = true;
+        self.requireOwner();
+        self.event_ended = true;
     }
 
     receive(msg: RequestMintNft){
@@ -32,29 +33,13 @@ contract NftCollection with Ownable {
     }
 
 
-    receive(msg: TransferByCollection) {
-        require(msg.index <= self.next_item_index, "Invalid Index");
-        let ctx: Context = context();
-        let nft_init: StateInit = initOf NftItem(myAddress(), msg.index);
-        let nft_address: Address = contractAddress(nft_init);
-        let active: Int = 0;
-        if (self.activated_tickets_transfer) {
-            active = 1;
-        }
-        let custom_payload: Cell = beginCell().storeAddress(sender()).storeUint(active, 1).endCell();
+    receive(msg: GetIsEventEnded) {
         send(SendParameters{
-            to: nft_address,
-            value: ctx.value,
-            mode: SendPayGasSeparately,
+            to: sender(),
+            value: 0,
+            mode: SendRemainingValue,
             bounce: false,
-            body: Transfer{
-                query_id: msg.query_id,
-                new_owner: msg.new_owner,
-                response_destination: msg.response_destination,
-                custom_payload: custom_payload,
-                forward_amount: msg.forward_amount,
-                forward_payload: msg.forward_payload,
-            }.toCell()
+            body: ReportIsEventEnded { query_id: msg.query_id, event_ended: self.event_ended }.toCell()
         });
     }
 

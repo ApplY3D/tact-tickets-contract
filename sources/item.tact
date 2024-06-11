@@ -8,6 +8,8 @@ contract NftItem {
     is_initialized: Bool;
 
     owner: Address?;
+    is_activated: Bool = false;
+    current_transfer: Transfer?;
     individual_content: Cell?;
 
     init(collection_address: Address, item_index: Int){
@@ -26,48 +28,56 @@ contract NftItem {
         self.is_initialized = true;
     }
 
-
-    receive(msg: Transfer){
+    receive(msg: ReportIsEventEnded) {
         let ctx: Context = context();
-        let custom_payload: Slice? = null;
-        let from: Address? = null;
-        let transfer_acticated_tickets: Int = 0;
-        if(msg.custom_payload != null) {
-          custom_payload = (msg.custom_payload!!).asSlice();
-          from = (custom_payload!!).loadAddress();
-          transfer_acticated_tickets = (custom_payload!!).loadUint(1);
-          (custom_payload!!).endParse();
-        }
-        require(self.is_initialized == true, "not initialized");
-        require(ctx.sender == self.collection_address, "Only collection can transfer");
-        require(from == self.owner!!, "Invalid Owner");
-        let msgValue: Int = self.msgValue(ctx.value);
-        self.owner = msg.new_owner;  // change current owner to the new_owner
-        if (msg.forward_amount > 0) {
+        require(ctx.sender == self.collection_address, "Invalid Sender");
+        require(self.is_activated == false || msg.event_ended == true, "Transferable only if event ended or not activated");
+
+        require(self.current_transfer != null, "Current transfer is null");
+        require((self.current_transfer!!).new_owner != null, "Next owner is null");
+        let current_transfer: Transfer = self.current_transfer!!;
+        self.current_transfer = null;
+        self.owner = current_transfer.new_owner;
+        if (current_transfer.forward_amount > 0) {
             send(SendParameters{
-                to: msg.new_owner,
-                value: msg.forward_amount,
+                to: current_transfer.new_owner,
+                value: current_transfer.forward_amount,
                 mode:  SendPayGasSeparately, 
                 bounce: true,
                 body: OwnershipAssigned{
-                    query_id: msg.query_id,
-                    prev_owner: ctx.sender,
-                    forward_payload: msg.forward_payload
+                    query_id: current_transfer.query_id,
+                    prev_owner: self.owner!!,
+                    forward_payload: current_transfer.forward_payload
                 }.toCell()
             }); 
         }
-
+        let msgValue: Int = self.msgValue(ctx.value);
         msgValue = msgValue - ctx.readForwardFee(); 
-        if (msg.response_destination != null) { 
+        if (current_transfer.response_destination != null) { 
             send(SendParameters{ 
-                to: msg.response_destination!!,
-                value: msgValue - msg.forward_amount,
+                to: current_transfer.response_destination!!,
+                value: msgValue - current_transfer.forward_amount,
                 mode: SendPayGasSeparately,
                 bounce: true,
-                body: Excesses { query_id: msg.query_id }.toCell()
+                body: Excesses { query_id: current_transfer.query_id }.toCell()
             });
-        } 
-        
+        }
+    }
+
+    receive(msg: Transfer){
+        let ctx: Context = context();
+        require(self.is_initialized == true, "not initialized");
+        require(ctx.sender == self.owner!!, "Invalid Owner");
+        require(self.current_transfer == null, "Current transfer is not null");
+        let msgValue: Int = self.msgValue(ctx.value);
+        self.current_transfer = msg;
+        send(SendParameters{ 
+            to: self.collection_address,
+            value: msgValue,
+            mode: SendPayGasSeparately,
+            bounce: true,
+            body: GetIsEventEnded { query_id: msg.query_id }.toCell()
+        });
     }
     
     receive(msg: GetStaticData){ 
