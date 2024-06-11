@@ -76,7 +76,7 @@ contract NftCollection with Ownable {
         send(SendParameters{
             to: ctx.sender,
             value: 0,
-            mode: 64, 
+            mode: SendRemainingValue, 
             bounce: false,
             body: ReportRoyaltyParams {
                 query_id: msg.query_id,

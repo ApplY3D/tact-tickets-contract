@@ -32,36 +32,11 @@ contract NftItem {
         let ctx: Context = context();
         require(ctx.sender == self.collection_address, "Invalid Sender");
         require(self.is_activated == false || msg.event_ended == true, "Transferable only if event ended or not activated");
-
         require(self.current_transfer != null, "Current transfer is null");
         require((self.current_transfer!!).new_owner != null, "Next owner is null");
         let current_transfer: Transfer = self.current_transfer!!;
         self.current_transfer = null;
-        self.owner = current_transfer.new_owner;
-        if (current_transfer.forward_amount > 0) {
-            send(SendParameters{
-                to: current_transfer.new_owner,
-                value: current_transfer.forward_amount,
-                mode:  SendPayGasSeparately, 
-                bounce: true,
-                body: OwnershipAssigned{
-                    query_id: current_transfer.query_id,
-                    prev_owner: self.owner!!,
-                    forward_payload: current_transfer.forward_payload
-                }.toCell()
-            }); 
-        }
-        let msgValue: Int = self.msgValue(ctx.value);
-        msgValue = msgValue - ctx.readForwardFee(); 
-        if (current_transfer.response_destination != null) { 
-            send(SendParameters{ 
-                to: current_transfer.response_destination!!,
-                value: msgValue - current_transfer.forward_amount,
-                mode: SendPayGasSeparately,
-                bounce: true,
-                body: Excesses { query_id: current_transfer.query_id }.toCell()
-            });
-        }
+        self.change_owner(current_transfer, ctx);
     }
 
     receive(msg: Transfer){
@@ -85,7 +60,7 @@ contract NftItem {
         send(SendParameters {
             to: ctx.sender,
             value: 0,
-            mode: 64,  // (return msg amount except gas fees) 
+            mode: SendRemainingValue,
             bounce: true,
             body: ReportStaticData{
                 query_id: msg.query_id,
@@ -99,6 +74,34 @@ contract NftItem {
         let tonBalanceBeforeMsg: Int = myBalance() - value;
         let storageFee: Int = minTonsForStorage - min(tonBalanceBeforeMsg, minTonsForStorage);
         return value - (storageFee + gasConsumption);
+    }
+
+    fun change_owner(msg: Transfer, ctx: Context) {
+        self.owner = msg.new_owner;
+        if (msg.forward_amount > 0) {
+            send(SendParameters{
+                to: msg.new_owner,
+                value: msg.forward_amount,
+                mode:  SendPayGasSeparately, 
+                bounce: true,
+                body: OwnershipAssigned{
+                    query_id: msg.query_id,
+                    prev_owner: self.owner!!,
+                    forward_payload: msg.forward_payload
+                }.toCell()
+            }); 
+        }
+        let msgValue: Int = self.msgValue(ctx.value);
+        msgValue = msgValue - ctx.readForwardFee(); 
+        if (msg.response_destination != null) { 
+            send(SendParameters{ 
+                to: msg.response_destination!!,
+                value: msgValue - msg.forward_amount,
+                mode: SendPayGasSeparately,
+                bounce: true,
+                body: Excesses { query_id: msg.query_id }.toCell()
+            });
+        }
     }
 
     // --------- Get Function  --------- //
